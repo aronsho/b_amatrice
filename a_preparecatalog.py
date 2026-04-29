@@ -1,15 +1,21 @@
 # ========= IMPORTS =========
+from functions.transformation_functions import transform_and_rotate
 from seismostats.utils import binning_test
 import pandas as pd
+import numpy as np
 
 # ======== SPECIFY PARAMETERS =========
 delta_m = 0.01
 training_share = 0.6
 max_depth = 50.0
+magnitude_type = 'ML'
 max_latitude = 43.1
 min_latitude = 42.5
 max_longitude = 13.4
 min_longitude = 12.9
+
+ref_point1 = np.array([42.8, 13.0, 0])
+ref_point2 = np.array([42.8, 13.2, 0])
 
 location = 'data/catalogs/Amatrice_CAT5.v20210325'
 
@@ -36,7 +42,7 @@ cat_raw.columns = column_names
 cat_all = cat_raw.copy()
 cat_all['time'] = pd.to_datetime(
     cat_all[['year', 'month', 'day', 'hour', 'minute', 'second']])
-cat_all['magnitude'] = cat_all['ML']
+cat_all['magnitude'] = cat_all[magnitude_type]
 # delete the time columns
 cat_all.drop(columns=['year', 'month', 'day', 'hour',
              'minute', 'second'], inplace=True)
@@ -56,7 +62,19 @@ cat_all = cat_all[cat_all.longitude >= min_longitude]
 cat_all = cat_all[cat_all.longitude <= max_longitude]
 
 
-# ======== SPLIT DATA ===================
+# ======== TRANSFORM AND ROTATE ===========
+lats = cat_all['latitude'].values
+lons = cat_all['longitude'].values
+depths = cat_all['depth'].values
+
+cart_coords, cart_p2 = transform_and_rotate(
+    ref_point1, ref_point2, lats, lons, depths)
+
+cat_all['x'] = cart_coords[1, :]
+cat_all['y'] = cart_coords[0, :]
+cat_all['z'] = cart_coords[2, :]
+
+# ======== SPLIT DATA ====================
 # sort df_amatrice in time
 cat_all = cat_all.sort_values(by='time')
 
