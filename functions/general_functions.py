@@ -1,8 +1,10 @@
 # imports
+from gstools import SRF, Gaussian
 import numpy as np
 import rft1d
 import scipy
 from scipy.stats import norm
+from typing import List
 
 from seismostats.utils import simulate_magnitudes_binned, bin_to_precision
 from seismostats.analysis import (
@@ -21,6 +23,7 @@ def dist_to_ref(x,  x_ref, y, y_ref, z=None, z_ref=None):
 def likelihood_exp(
         magnitude: np.ndarray,
         mc: float | np.ndarray,
+        delta_m: float,
         b_value:  float | np.ndarray) -> np.ndarray:
     """likelihood of each magnitude given the b-value and the completeness
 
@@ -29,11 +32,17 @@ def likelihood_exp(
         mc:         completeness magnitude. if a single value is given, it is
                 assumed that the completeness magnitude is the same for all
                 magnitudes.
+        delta_m:    magnitude bin width
         b_value:    b-value. if a single value is given, it is assumed that
                 the b-value is the same for all magnitudes.
     """
     beta = b_value_to_beta(b_value)
-    p = beta * np.exp(-beta * (magnitude - mc))
+
+    if delta_m == 0:
+        p = beta * np.exp(-beta * (magnitude - mc))
+    else:
+        p = np.exp(- beta*(magnitude - mc + delta_m/2)) * \
+            2 * np.sinh(beta*delta_m/2)
     return p
 
 
@@ -208,7 +217,7 @@ def simulate_rectangular(
     b: float,
     delta_b: float,
     mc: float,
-    delta_m: float = 0.01,
+    delta_m: float,
 ) -> tuple[np.ndarray, np.ndarray]:
     """Simulate binned magnitudes with a step of length N_deviation in the
     b-value
@@ -240,7 +249,7 @@ def simulate_step(
     b: float,
     delta_b: float,
     mc: float,
-    delta_m: float = 0.01,
+    delta_m: float,
     idx_step: int | None = None,
 ) -> tuple[np.ndarray, np.ndarray]:
     """Simulate binned magnitudes with a step at idx in the b-value
@@ -276,7 +285,7 @@ def simulate_sinus(
     b: float,
     delta_b: float,
     mc: float,
-    delta_m: float = 0.01,
+    delta_m: float,
 ) -> tuple[np.ndarray, np.ndarray]:
     """Simulate binned magnitudes with an underlying sinusoidal b-value
     distribution
@@ -308,7 +317,7 @@ def simulate_ramp(
     b: float,
     delta_b: float,
     mc: float,
-    delta_m: float = 0.01,
+    delta_m: float,
 ) -> tuple[np.ndarray, np.ndarray]:
     """Simulate binned magnitudes with an underlying b-value that rises
     constantly
@@ -331,13 +340,101 @@ def simulate_ramp(
     return magnitudes, b_true
 
 
+def randomfield(
+        coords: List[np.ndarray],
+        len_scales: List[float]
+) -> np.ndarray:
+    """
+    Sample a Gaussian random field at given coordinates.
+    Args:
+        coords : list of coordinate arrays [x1, x2, ... , xd]
+                 each of same length
+        len_scales : list of correlation lengths for all d dimensions
+
+    Returns:
+        field : array of random field values at the provided coordinates,
+                of same length as each coordinate array
+    """
+
+    n_dim = len(coords)
+    coords = [np.asarray(c) for c in coords]
+
+    # Gaussian covariance model
+    model = Gaussian(dim=n_dim, var=1.0, len_scale=len_scales)
+    srf = SRF(model)
+
+    # sample Gaussian random field at the provided coordinates
+    field = srf(coords)
+
+    return field
+
+
 def simulate_randomfield(
+        coords: List[np.ndarray],
+        times: np.ndarray,
+        b: float,
+        b_std: float,
+        kernel_width_space: float,
+        kernel_width_time: float,
+        mc: float,
+        delta_m: float,
+):
+    """
+    Sample b-values at given space-time points from a Gaussian random field.
+
+    Args:
+        coords : list of spatial coordinate arrays [x, y, z, ...]
+                 each of length n_total
+        times  : array of time points of length n_total (must be numeric)
+        b      : mean b-value
+        b_std  : standard deviation (scaling) of the GRF
+        kernel_width_space : spatial correlation length
+        kernel_width_time  : temporal correlation length
+        mc: completeness magnitude
+        delta_m: magnitude bin width
+
+    Returns:
+        b_true : array of b-values of length n_total
+    """
+    # convert inputs to arrays
+    n_total = len(times)
+    coords = [np.asarray(c) for c in coords]
+    times = np.asarray(times)
+    times = times.copy()
+
+    # normalize time to [0, 1]
+    scaling = np.max(times) - np.min(times)
+    kernel_width_time = kernel_width_time / scaling
+    times = (times - np.min(times)) / scaling
+
+    # stack space + time into a single coordinate list
+    pts = coords + [times]          # last dimension = time
+    n_dim = len(pts)
+
+    # shape for GSTools: (dim, n_total)
+    pts = np.vstack(pts)
+
+    # anisotropic correlation lengths: one per dimension
+    len_scales = [kernel_width_space] * (n_dim - 1) + [kernel_width_time]
+    field = randomfield(pts, len_scales)
+
+    # convert field to b-values
+    b_true = b + b_std * field
+
+    # simulate magnitudes
+    b_true[b_true <= 0.1] = 0.1  # avoid non-physical b-values
+    magnitudes = simulate_magnitudes_binned(n_total, b_true, mc, delta_m)
+
+    return magnitudes, b_true
+
+
+def simulate_randomfield_1D(
     n_total: int,
     kernel_width: float,
     b: float,
     b_std: float,
     mc: float,
-    delta_m: float = 0.01,
+    delta_m: float,
 ) -> tuple[np.ndarray, np.ndarray]:
     """Simulate binned magnitudes where the underlying b-values vary with time
     as a random gaussian process
@@ -401,7 +498,7 @@ def normalcdf_incompleteness(
 ) -> np.ndarray:
     """Filtering function: normal cdf with a standard deviation of sigma. The
     output can be interpreted as the probability to detect an earthquake. At
-    mc, the probability of detect an earthquake is per definition 50%.
+    mc, the probability of detect an earthquake is per definition 50 % .
 
     Args:
         mags:   array of magnitudes
@@ -449,7 +546,7 @@ def probability_m(
         a_value:    a-value, scaled to the time of interest
         b_value:    b-value
         m:          magnitude at which the probability is estimated
-        m_ref:      reference magnitude (at which the a-value is given), by
+        m_ref:      reference magnitude(at which the a-value is given), by
                 default 0
 
     Returns:
