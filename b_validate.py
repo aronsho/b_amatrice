@@ -8,6 +8,7 @@ import os
 import itertools as it
 import time
 from scipy import stats
+import sys
 
 import warnings
 from seismostats.analysis import (
@@ -53,7 +54,7 @@ fmd_bin = 0.1
 
 step = 1000  # discretization of evaluation times in order to save computation
 mc_chosen_classic = 2.7
-mc_chosen_positive = 1.0
+mc_chosen_positive = 0.7
 
 # ======== get Data =========================
 # == Train==
@@ -61,7 +62,6 @@ location = 'data/training/Amatrice_CAT5_train.csv'
 cat_raw = pd.read_csv(location)
 cat_traintest = Catalog(cat_raw)
 cat_traintest.delta_m = delta_m
-cat_traintest.mc = mc_train
 
 # == use only 60% for training, 40% for validation
 training_share = 0.6
@@ -82,7 +82,7 @@ def estimate_mc(magnitudes):
 # estimate overall b-values (training)
 estimator = ClassicBValueEstimator()
 _ = estimator.calculate(
-    cat_train.magnitude, mc=mc_train, delta_m=cat_train.delta_m)
+    cat_train.magnitude, mc=mc_chosen_classic, delta_m=cat_train.delta_m)
 b_all_classic = estimator.b_value
 
 estimator = BPositiveBValueEstimator()
@@ -103,8 +103,9 @@ eval_coords = coords_test
 
 # ======TRAINTEST related========
 # estimate differences for cat_traintest
+cat_traintest.mc = mc_train
 cat_traintest = cat_traintest[cat_traintest['magnitude']
-                              > mc_train - delta_m/2]
+                              > cat_traintest.mc - delta_m/2]
 cat_traintest = cat_traintest.sort_values(by='time').reset_index(drop=True)
 # coords
 coords_traintest = [

@@ -1,4 +1,4 @@
-# sbatch --array=0-119  --time=960 --mem-per-cpu=150000 --wrap="python c_test.py"
+# sbatch --array=0-119  --time=960 --mem-per-cpu=150000 --wrap="python d_test.py"
 
 import pandas as pd
 from seismostats import Catalog
@@ -8,6 +8,7 @@ import os
 import itertools as it
 import time
 from scipy import stats
+import sys
 
 import warnings
 from seismostats.analysis import (
@@ -27,7 +28,7 @@ print("running index:", job_index, "type", type(job_index))
 t = time.time()
 
 # ===== Changeable Params ===========================
-results_dir = "results/test_20260502"
+results_dir = "results/test_20260504"
 
 n_time_list = [2, 4, 8, 16, 32, 64, 128, 256, 512, 1024]
 n_space_list = [1, 2, 4, 8, 16, 32, 64, 128, 256, 512, 1024, 2048]
@@ -53,7 +54,7 @@ fmd_bin = 0.1
 
 step = 1000  # discretization of evaluation times in order to save computation
 mc_chosen_classic = 2.7
-mc_chosen_positive = 1.0
+mc_chosen_positive = 0.7
 
 # ======== get Data =========================
 # == Train==
@@ -85,7 +86,7 @@ def estimate_mc(magnitudes):
 # estimate overall b-values (training)
 estimator = ClassicBValueEstimator()
 _ = estimator.calculate(
-    cat_train.magnitude, mc=mc_train, delta_m=cat_train.delta_m)
+    cat_train.magnitude, mc=mc_chosen_classic, delta_m=cat_train.delta_m)
 b_all_classic = estimator.b_value
 
 estimator = BPositiveBValueEstimator()
@@ -106,14 +107,11 @@ eval_coords = coords_test
 
 # ======TRAINTEST related========
 # estimate differences for cat_traintest
-cat_traintest = cat_traintest[cat_traintest['magnitude']
-                              > mc_train - delta_m/2]
-cat_traintest = cat_traintest.sort_values(by='time').reset_index(drop=True)
-cat_traintest['magnitude'] = cat_traintest['magnitude'].diff()
-cat_traintest = cat_traintest.iloc[1:]
-cat_traintest.mc = dmc
+cat_traintest.mc = mc_train
 cat_traintest = cat_traintest[cat_traintest['magnitude']
                               > cat_traintest.mc - delta_m/2]
+cat_traintest = cat_traintest.sort_values(by='time').reset_index(drop=True)
+# coords
 coords_traintest = [
     cat_traintest.x.values, cat_traintest.y.values, cat_traintest.z.values]
 # limits
@@ -156,14 +154,15 @@ if n_time * n_space >= 15 and len(cat_traintest) / (n_time * n_space) > 8:
         eval_coords=eval_coords,
         eval_times=eval_times[::step],
         min_num=50,
-        method=ClassicBValueEstimator,
+        method=BPositiveBValueEstimator,
         mc=cat_traintest.mc,
         mc_method=estimate_mc,
         transform=True,
         voronoi_method='random',
         time_cut_method='constant_time',
         min_count=20,
-        time_bar=False)
+        time_bar=False,
+        dmc=dmc)
 
     # estimate b_average for all eval points
     b_average = np.ones(len(eval_times)) * np.nan
@@ -214,7 +213,7 @@ else:
 
 
 # save as csv
-filename = f"valid_n_time{n_time}_n_space{n_space}.csv"
+filename = f"test_n_time{n_time}_n_space{n_space}.csv"
 path = os.path.join(results_dir, filename)
 with open(path, "w", newline="") as f:
     writer = csv.writer(f)

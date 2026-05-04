@@ -1,4 +1,4 @@
-# sbatch --array=0-129 --time=240 --mem-per-cpu=200000 --wrap="python c_training.py"
+# sbatch --array=0-129 --time=240 --mem-per-cpu=200000 --wrap="python a_training_1.py"
 
 import pandas as pd
 from seismostats import Catalog
@@ -7,6 +7,7 @@ import csv
 import os
 import itertools as it
 import time
+import sys
 
 import warnings
 from seismostats.analysis import (
@@ -18,7 +19,8 @@ from functions.transformation_functions import transform_and_rotate
 from functions.space_time_separated_map import mac_spacetime
 
 # ===== job_index ===========================
-job_index = int(os.getenv("SLURM_ARRAY_TASK_ID"))
+# job_index = int(os.getenv("SLURM_ARRAY_TASK_ID"))
+job_index = int(sys.argv[1])
 print("running index:", job_index, "type", type(job_index))
 t = time.time()
 
