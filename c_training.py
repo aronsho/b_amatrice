@@ -10,6 +10,7 @@ import time
 
 import warnings
 from seismostats.analysis import (
+    BPositiveBValueEstimator,
     estimate_mc_maxc,
     ClassicBValueEstimator)
 
@@ -22,7 +23,7 @@ print("running index:", job_index, "type", type(job_index))
 t = time.time()
 
 # ===== Changeable Params ===========================
-results_dir = "results/training_pos_20260504"
+results_dir = "results/training_20260504"
 
 n_time_list = [2, 4, 8, 16, 32, 64, 128, 256, 512, 1024]
 n_space_list = [1, 2, 4, 8, 16, 32, 64, 128, 256, 512, 1024, 2048, 4096]
@@ -67,14 +68,7 @@ def estimate_mc(magnitudes):
 cat_train.estimate_mc_maxc(
     fmd_bin=fmd_bin, correction_factor=correction_factor)
 cat_train = cat_train[cat_train['magnitude'] > cat_train.mc - delta_m/2]
-
-# estimate differences
-cat_train = cat_train.sort_values(by='time').reset_index(drop=True)
-cat_train['magnitude'] = cat_train['magnitude'].diff()
-cat_train = cat_train.iloc[1:]
-cat_train.mc = dmc
-cat_train = cat_train[cat_train['magnitude'] > cat_train.mc - delta_m/2]
-
+# coords
 coords = [cat_train.x.values, cat_train.y.values, cat_train.z.values]
 
 # eval coords
@@ -109,19 +103,20 @@ if n_time * n_space >= 15 and len(cat_train) / (n_time * n_space) > 4:
         limits=limits,
         n_space=n_space,
         n_time=n_time,
-        space_realizations=20,
-        time_realizations=10,
+        space_realizations=40,
+        time_realizations=20,
         eval_coords=eval_coords,
         eval_times=eval_times,
         min_num=50,
-        method=ClassicBValueEstimator,
+        method=BPositiveBValueEstimator,
         mc=cat_train.mc,
         mc_method=estimate_mc,
         transform=True,
         voronoi_method='random',
         time_cut_method='constant_time',
-        min_count=2,
-        time_bar=False)
+        min_count=20,
+        time_bar=False,
+        dmc=dmc)
 else:
     print('no estimation.')
     b_average = np.nan

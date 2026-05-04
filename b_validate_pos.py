@@ -27,7 +27,7 @@ print("running index:", job_index, "type", type(job_index))
 t = time.time()
 
 # ===== Changeable Params ===========================
-results_dir = "results/validation_20260504"
+results_dir = "results/validation_pos_20260504"
 
 n_time_list = [2, 4, 8, 16, 32, 64, 128, 256, 512, 1024]
 n_space_list = [1, 2, 4, 8, 16, 32, 64, 128, 256, 512, 1024, 2048]
@@ -101,6 +101,12 @@ eval_times = cat_test.time.values
 eval_coords = coords_test
 
 # ======TRAINTEST related========
+# limits
+limits = [
+    [cat_traintest.x.min(), cat_traintest.x.max()],
+    [cat_traintest.y.min(), cat_traintest.y.max()],
+    [cat_traintest.z.min(), cat_traintest.z.max()]]
+
 # estimate differences for cat_traintest
 cat_traintest = cat_traintest[cat_traintest['magnitude']
                               > mc_train - delta_m/2]
@@ -112,11 +118,6 @@ cat_traintest = cat_traintest[cat_traintest['magnitude']
                               > cat_traintest.mc - delta_m/2]
 coords_traintest = [
     cat_traintest.x.values, cat_traintest.y.values, cat_traintest.z.values]
-# limits
-limits = [
-    [cat_traintest.x.min(), cat_traintest.x.max()],
-    [cat_traintest.y.min(), cat_traintest.y.max()],
-    [cat_traintest.z.min(), cat_traintest.z.max()]]
 
 
 # Scale n_time  correctly (n_space is same since volume is similar)
