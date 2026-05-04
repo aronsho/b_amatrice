@@ -92,7 +92,7 @@ def mac_space(
     """
 
     # 1. preparation
-    # convert all to np.dnarrays
+    # convert all to np.ndarrays
     mags = np.asarray(mags)
     times = np.asarray(times)
     coords = np.asarray(coords)
