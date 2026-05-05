@@ -7,9 +7,9 @@ import csv
 import os
 import itertools as it
 import time
+import sys
 
 import warnings
-import sys
 from seismostats.analysis import (
     BPositiveBValueEstimator,
     estimate_mc_maxc,
@@ -60,7 +60,8 @@ space_realizations, time_realizations, min_count = (
 location = 'data/training/Amatrice_CAT5_train.csv'
 
 cat_raw = pd.read_csv(location)
-cat_train = Catalog(cat_raw)
+cat_all = Catalog(cat_raw)
+cat_train = cat_all.copy()
 cat_train.delta_m = delta_m
 
 # ========== Helpers ==========================
@@ -80,6 +81,14 @@ def estimate_mc(magnitudes):
 cat_train.estimate_mc_maxc(
     fmd_bin=fmd_bin, correction_factor=correction_factor)
 cat_train = cat_train[cat_train['magnitude'] > cat_train.mc - delta_m/2]
+
+# estimate differences for cat_traintest
+cat_train = cat_train.sort_values(by='time').reset_index(drop=True)
+cat_train['magnitude'] = cat_train['magnitude'].diff()
+cat_train = cat_train.iloc[1:]
+cat_train.mc = dmc
+cat_train = cat_train[cat_train['magnitude'] > cat_train.mc - delta_m/2]
+
 # coords
 coords = [cat_train.x.values, cat_train.y.values, cat_train.z.values]
 
@@ -89,9 +98,9 @@ eval_coords = [[coords[0][0]], [coords[1][0]], [coords[2][0]]]
 
 # limits
 limits = [
-    [cat_train.x.min(), cat_train.x.max()],
-    [cat_train.y.min(), cat_train.y.max()],
-    [cat_train.z.min(), cat_train.z.max()]]
+    [cat_all.x.min(), cat_all.x.max()],
+    [cat_all.y.min(), cat_all.y.max()],
+    [cat_all.z.min(), cat_all.z.max()]]
 
 # length scale
 volume = (limits[0][1] - limits[0][0]) * (limits[1][1] - limits[1][0]) * (
@@ -120,15 +129,16 @@ if n_time * n_space >= 15 and len(cat_train) / (n_time * n_space) > 4:
         eval_coords=eval_coords,
         eval_times=eval_times,
         min_num=50,
-        method=BPositiveBValueEstimator,
+        method=ClassicBValueEstimator,
         mc=cat_train.mc,
-        mc_method=estimate_mc,
+        # mc_method=estimate_mc,
         transform=True,
         voronoi_method='random',
         time_cut_method='constant_time',
         min_count=min_count,
         time_bar=False,
-        dmc=dmc)
+        # dmc=dmc
+    )
 else:
     print('no estimation.')
     b_average = np.nan

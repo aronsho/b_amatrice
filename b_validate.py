@@ -63,14 +63,15 @@ space_realizations, time_realizations, min_count = (
         default_time_realizations=20,
         default_min_count=20))
 
-step = 5000  # discretization of evaluation times in order to save computation
+step = 500  # discretization of evaluation times in order to save computation
 mc_chosen_classic = 2.7
-mc_chosen_positive = 1.0
+mc_chosen_positive = 0.7
 
 # ======== get Data =========================
 # == Train==
 location = 'data/training/Amatrice_CAT5_train.csv'
 cat_raw = pd.read_csv(location)
+cat_all = Catalog(cat_raw)
 cat_traintest = Catalog(cat_raw)
 cat_traintest.delta_m = delta_m
 
@@ -114,18 +115,22 @@ eval_coords = coords_test
 
 # ======TRAINTEST related========
 # estimate differences for cat_traintest
-cat_traintest.mc = mc_train
+cat_traintest = cat_traintest[cat_traintest['magnitude']
+                              > mc_train - delta_m/2]
+cat_traintest = cat_traintest.sort_values(by='time').reset_index(drop=True)
+cat_traintest['magnitude'] = cat_traintest['magnitude'].diff()
+cat_traintest = cat_traintest.iloc[1:]
+cat_traintest.mc = dmc
 cat_traintest = cat_traintest[cat_traintest['magnitude']
                               > cat_traintest.mc - delta_m/2]
-cat_traintest = cat_traintest.sort_values(by='time').reset_index(drop=True)
-# coords
 coords_traintest = [
     cat_traintest.x.values, cat_traintest.y.values, cat_traintest.z.values]
+
 # limits
 limits = [
-    [cat_traintest.x.min(), cat_traintest.x.max()],
-    [cat_traintest.y.min(), cat_traintest.y.max()],
-    [cat_traintest.z.min(), cat_traintest.z.max()]]
+    [cat_all.x.min(), cat_all.x.max()],
+    [cat_all.y.min(), cat_all.y.max()],
+    [cat_all.z.min(), cat_all.z.max()]]
 
 
 # Scale n_time  correctly (n_space is same since volume is similar)
@@ -161,15 +166,16 @@ if n_time * n_space >= 15 and len(cat_traintest) / (n_time * n_space) > 8:
         eval_coords=eval_coords,
         eval_times=eval_times[::step],
         min_num=50,
-        method=BPositiveBValueEstimator,
+        method=ClassicBValueEstimator,
         mc=cat_traintest.mc,
-        mc_method=estimate_mc,
+        # mc_method=estimate_mc,
         transform=True,
         voronoi_method='random',
         time_cut_method='constant_time',
         min_count=min_count,
         time_bar=False,
-        dmc=dmc)
+        # dmc=dmc
+    )
 
     # estimate b_average for all eval points
     b_average = np.ones(len(eval_times)) * np.nan
