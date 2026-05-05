@@ -37,6 +37,37 @@ def estimate_mc_local(tile_mags, mc_min, mc_method):
     return mc_local
 
 
+def est_morans_i_temporal(
+        values: np.ndarray,
+        n_space: int,
+        mean_v: float | np.ndarray | None = None) -> tuple[float, int, int]:
+    """Estimate Moran's I for consecutive time slices without a dense matrix."""
+    values = np.asarray(values)
+    if len(values) < 2:
+        raise ValueError("At least 2 values are needed for the estimation.")
+    if len(values) % n_space != 0:
+        raise ValueError("values length must be a multiple of n_space.")
+
+    valid_mask = ~np.isnan(values)
+    if mean_v is None:
+        mean_v = np.mean(values[valid_mask])
+
+    deviations = values - mean_v
+    deviations[~valid_mask] = 0
+
+    valid_pairs = valid_mask[:-n_space] & valid_mask[n_space:]
+    ac_num = np.sum(deviations[:-n_space][valid_pairs]
+                    * deviations[n_space:][valid_pairs])
+    ac_0 = deviations @ deviations
+
+    n_p = int(np.sum(valid_pairs))
+    n = int(np.sum(valid_mask))
+    if n_p == 0 or ac_0 == 0:
+        return np.nan, n, n_p
+    ac = (n - 1) / n_p * ac_num / ac_0
+    return ac, n, n_p
+
+
 def mac_spacetime(
         coords: np.ndarray,
         mags: np.ndarray,
@@ -166,6 +197,9 @@ def mac_spacetime(
     eval_times = np.asarray(
         eval_times) if eval_times is not None else times
     eval_times = pd.to_datetime(eval_times).values.astype("datetime64[ns]")
+    times_min = np.min(times)
+    times_max = np.max(times)
+    times_span = times_max - times_min
 
     # dimensions (2 and 3D possible)
     dim, n_events = coords.shape
@@ -252,15 +286,15 @@ def mac_spacetime(
         all_time_steps = np.concatenate(all_time_steps)
         all_time_steps = all_time_steps[all_time_steps < n_events].astype(int)
     elif time_cut_method == 'constant_time':
-        length_time = (np.max(times) - np.min(times)) / n_time
+        length_time = times_span / n_time
         delta_skip_time = length_time / time_realizations
-        time_steps = np.arange(np.min(times), np.min(
-            times) + length_time, delta_skip_time)
+        time_steps = np.arange(times_min, times_min + length_time,
+                               delta_skip_time)
         for ii in range(1, n_time+1):
             shifted = time_steps + ii * length_time
             all_time_steps.append(shifted)
         all_time_steps = np.concatenate(all_time_steps)
-        all_time_steps = all_time_steps[all_time_steps < np.max(times)]
+        all_time_steps = all_time_steps[all_time_steps < times_max]
         all_time_steps = np.searchsorted(
             times, all_time_steps, side='right') - 1
     elif time_cut_method == 'eval_times':
@@ -283,25 +317,6 @@ def mac_spacetime(
     if time_bar:
         progress_bar = tqdm(total=space_realizations *
                             len(time_steps), desc="Progress")
-
-    # preestimate nearest neighbor matrix
-    def create_w(n_timeslice, n_space):
-        T = n_timeslice * n_space
-        w_temporal = np.zeros((T, T), dtype=float)
-        rows = np.arange(T - n_space)
-        cols = rows + n_space
-        w_temporal[rows, cols] = 1.0
-        return w_temporal
-    if time_cut_method == 'constant_idx':
-        n_timeslice = int(np.ceil(n_events / n_m_time))
-    elif time_cut_method == 'constant_time':
-        n_timeslice = n_time
-    elif time_cut_method == 'eval_times':
-        n_timeslice = len(all_time_steps) + 1
-    w_temporal_list = []
-    w_temporal_list.append(create_w(n_timeslice, n_space))
-    w_temporal_list.append(create_w(n_timeslice + 1, n_space))
-    w_temporal_list.append(create_w(n_timeslice + 2, n_space))
 
     # 2. loop over realizations
     for ii in range(space_realizations):
@@ -358,7 +373,7 @@ def mac_spacetime(
             elif time_cut_method == 'constant_time':
                 idx_left, time_times = cut_constant_value(
                     times, delta_value=length_time,
-                    offset=time_step - min(times))
+                    offset=time_step - times_min)
                 time_magnitudes = np.array_split(mags, idx_left)
             elif time_cut_method == 'eval_times':
                 idx_left = all_time_steps + 1
@@ -367,10 +382,6 @@ def mac_spacetime(
             time_nearest = np.array_split((nearest_events), idx_left)
             idx_right = np.concatenate([idx_left - 1, [len(mags)-1]])
             idx_left = np.concatenate([[0], idx_left])
-
-            # estimate the full nearest neighbour matrix, with only
-            # connections in time
-            w_temporal = w_temporal_list[int(len(idx_left) - n_timeslice)]
 
             # initialize arrays for estimating autocorrelation
             x_vec = np.zeros(len(idx_left) * n_space)
@@ -394,8 +405,8 @@ def mac_spacetime(
                 if x_is_a:
                     # scale a by time-window and spatial volume
                     scale_tmp = (
-                        np.max(time_times[jj]) - np.min(time_times[jj]))/(
-                        np.max(times) - np.min(times))
+                        np.max(time_times[jj]) - np.min(time_times[jj])) / (
+                        times_span)
                     scale_tmp *= volume_space
                     scale_tmp *= scaling_factor
                     x_loop, std_vec, n_m_loop = values_from_partitioning(
@@ -460,7 +471,8 @@ def mac_spacetime(
 
             # global temporal autocorrelation
             ac_temporal, n_temporal, n_p_temporal = (
-                est_morans_i(x_trans_local, w_temporal, mean_v=x_time_mean))
+                est_morans_i_temporal(
+                    x_trans_local, n_space=n_space, mean_v=x_time_mean))
             agg_ac_temporal = update_welford(agg_ac_temporal, ac_temporal)
             agg_n_p_temporal = update_welford(agg_n_p_temporal, n_p_temporal)
             agg_n_temporal = update_welford(agg_n_temporal, n_temporal)
@@ -469,7 +481,7 @@ def mac_spacetime(
             # variation? -> mac
             if transform:  # transform with overall b-value
                 x_vec = transform_n(x_vec, b_all, n_m, max(n_m))
-            ac, n, n_p = est_morans_i(x_vec, w_temporal)
+            ac, n, n_p = est_morans_i_temporal(x_vec, n_space=n_space)
             agg_ac = update_welford(agg_ac, ac)
             agg_n_p = update_welford(agg_n_p, n_p)
             agg_n = update_welford(agg_n, n)

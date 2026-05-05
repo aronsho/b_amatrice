@@ -1,6 +1,8 @@
 # imports
 from gstools import SRF, Gaussian
+import math
 import numpy as np
+import os
 import rft1d
 import scipy
 from scipy.stats import norm
@@ -11,6 +13,52 @@ from seismostats.analysis import (
     b_value_to_beta,
     estimate_b,
 )
+
+
+def resolve_realization_settings(
+        default_space_realizations: int,
+        default_time_realizations: int,
+        default_min_count: int,
+) -> tuple[int, int, int]:
+    """Resolve realization settings, with an optional lightweight test mode."""
+    test_mode = os.getenv("B_AMATRICE_TEST_MODE", "").lower() in {
+        "1", "true", "yes", "on"
+    }
+
+    if test_mode:
+        space_realizations = 10
+        time_realizations = 5
+    else:
+        space_realizations = default_space_realizations
+        time_realizations = default_time_realizations
+
+    space_realizations = int(os.getenv(
+        "B_AMATRICE_SPACE_REALIZATIONS", space_realizations))
+    time_realizations = int(os.getenv(
+        "B_AMATRICE_TIME_REALIZATIONS", time_realizations))
+
+    if test_mode:
+        base_total = default_space_realizations * default_time_realizations
+        current_total = space_realizations * time_realizations
+        min_count = max(
+            1,
+            math.ceil(default_min_count * current_total / base_total))
+    else:
+        min_count = default_min_count
+
+    min_count = int(os.getenv("B_AMATRICE_MIN_COUNT", min_count))
+    return space_realizations, time_realizations, min_count
+
+
+def resolve_job_index(argv: list[str], env_var: str = "SLURM_ARRAY_TASK_ID") -> int:
+    """Resolve a job index from CLI args first, then from the environment."""
+    if len(argv) > 1:
+        return int(argv[1])
+    value = os.getenv(env_var)
+    if value is None:
+        raise ValueError(
+            f"No job index provided. Pass it as argv[1] or set {env_var}.")
+    return int(value)
 
 
 def dist_to_ref(x,  x_ref, y, y_ref, z=None, z_ref=None):

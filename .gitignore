@@ -1,2 +1,4 @@
 env
 functions/__pycache__/
+results/*
+__pycache__/

@@ -8,6 +8,7 @@ import os
 import itertools as it
 import time
 from scipy import stats
+import sys
 
 import warnings
 from seismostats.analysis import (
@@ -18,16 +19,22 @@ from seismostats.analysis import (
 
 from functions.transformation_functions import transform_and_rotate
 from functions.space_time_separated_map import mac_spacetime
-from functions.general_functions import likelihood_exp
+from functions.general_functions import (
+    likelihood_exp,
+    resolve_job_index,
+    resolve_realization_settings,
+)
 from functions.main_functions import loglik_test, positive_test
+from functions.result_paths import default_run_name, resolve_results_dir
 
 # ===== job_index ===========================
-job_index = int(os.getenv("SLURM_ARRAY_TASK_ID"))
+job_index = resolve_job_index(sys.argv)
 print("running index:", job_index, "type", type(job_index))
 t = time.time()
 
 # ===== Changeable Params ===========================
-results_dir = "results/validation_pos_20260504"
+results_dir = resolve_results_dir(
+    "validation", fallback_run_name=default_run_name(include_time=False))
 
 n_time_list = [2, 4, 8, 16, 32, 64, 128, 256, 512, 1024]
 n_space_list = [1, 2, 4, 8, 16, 32, 64, 128, 256, 512, 1024, 2048]
@@ -50,15 +57,21 @@ delta_m = 0.01
 dmc = 0.2
 correction_factor = 0.2
 fmd_bin = 0.1
+space_realizations, time_realizations, min_count = (
+    resolve_realization_settings(
+        default_space_realizations=100,
+        default_time_realizations=20,
+        default_min_count=20))
 
-step = 1000  # discretization of evaluation times in order to save computation
+step = 500  # discretization of evaluation times in order to save computation
 mc_chosen_classic = 2.7
-mc_chosen_positive = 1.0
+mc_chosen_positive = 0.7
 
 # ======== get Data =========================
 # == Train==
 location = 'data/training/Amatrice_CAT5_train.csv'
 cat_raw = pd.read_csv(location)
+cat_all = Catalog(cat_raw)
 cat_traintest = Catalog(cat_raw)
 cat_traintest.delta_m = delta_m
 
@@ -81,7 +94,7 @@ def estimate_mc(magnitudes):
 # estimate overall b-values (training)
 estimator = ClassicBValueEstimator()
 _ = estimator.calculate(
-    cat_train.magnitude, mc=mc_train, delta_m=cat_train.delta_m)
+    cat_train.magnitude, mc=mc_chosen_classic, delta_m=cat_train.delta_m)
 b_all_classic = estimator.b_value
 
 estimator = BPositiveBValueEstimator()
@@ -101,12 +114,6 @@ eval_times = cat_test.time.values
 eval_coords = coords_test
 
 # ======TRAINTEST related========
-# limits
-limits = [
-    [cat_traintest.x.min(), cat_traintest.x.max()],
-    [cat_traintest.y.min(), cat_traintest.y.max()],
-    [cat_traintest.z.min(), cat_traintest.z.max()]]
-
 # estimate differences for cat_traintest
 cat_traintest = cat_traintest[cat_traintest['magnitude']
                               > mc_train - delta_m/2]
@@ -118,6 +125,12 @@ cat_traintest = cat_traintest[cat_traintest['magnitude']
                               > cat_traintest.mc - delta_m/2]
 coords_traintest = [
     cat_traintest.x.values, cat_traintest.y.values, cat_traintest.z.values]
+
+# limits
+limits = [
+    [cat_all.x.min(), cat_all.x.max()],
+    [cat_all.y.min(), cat_all.y.max()],
+    [cat_all.z.min(), cat_all.z.max()]]
 
 
 # Scale n_time  correctly (n_space is same since volume is similar)
@@ -148,19 +161,21 @@ if n_time * n_space >= 15 and len(cat_traintest) / (n_time * n_space) > 8:
         limits=limits,
         n_space=n_space,
         n_time=n_time_scaled,
-        space_realizations=40,
-        time_realizations=20,
+        space_realizations=space_realizations,
+        time_realizations=time_realizations,
         eval_coords=eval_coords,
         eval_times=eval_times[::step],
         min_num=50,
         method=ClassicBValueEstimator,
         mc=cat_traintest.mc,
-        mc_method=estimate_mc,
+        # mc_method=estimate_mc,
         transform=True,
         voronoi_method='random',
         time_cut_method='constant_time',
-        min_count=20,
-        time_bar=False)
+        min_count=min_count,
+        time_bar=False,
+        # dmc=dmc
+    )
 
     # estimate b_average for all eval points
     b_average = np.ones(len(eval_times)) * np.nan
@@ -212,7 +227,7 @@ else:
 
 # save as csv
 filename = f"valid_n_time{n_time}_n_space{n_space}.csv"
-path = os.path.join(results_dir, filename)
+path = results_dir / filename
 with open(path, "w", newline="") as f:
     writer = csv.writer(f)
     writer.writerow([
